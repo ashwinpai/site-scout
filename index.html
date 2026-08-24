@@ -114,6 +114,7 @@
     </div>
 
     <div class="status" id="status"></div>
+    <a href="#" id="diagLink" style="font-size:11.5px;color:var(--pine);display:inline-block;margin-bottom:6px">Run connectivity check</a>
 
     <div id="results" style="display:none">
       <div class="stamp-wrap">
@@ -267,6 +268,15 @@ async function jget(url,opts,label){
   if(!r.ok)throw new Error(who+" returned HTTP "+r.status);
   return r.json();
 }
+async function jgetRetry(url,opts,label,tries=2,delayMs=700){
+  let last;
+  for(let i=0;i<tries;i++){
+    try{ return await jget(url,opts,label); }
+    catch(e){ last=e; if(i<tries-1)await new Promise(r=>setTimeout(r,delayMs)); }
+  }
+  throw last;
+}
+const corsProxy=u=>"https://api.allorigins.win/raw?url="+encodeURIComponent(u);
 
 /* ================= map (initialized only after Leaflet is confirmed loaded) ================= */
 let map=null, layerGroup=null;
@@ -326,7 +336,13 @@ async function fetchACS(tractIds){
     const [st,co]=k.split("|");
     const u=`https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=${vars.join(",")}`+
             `&for=tract:*&in=${encodeURIComponent(`state:${st} county:${co}`)}`+(ACS_KEY?`&key=${ACS_KEY}`:"");
-    const rows=await jget(u,null,"Census ACS API"); const hdr=rows[0];
+    let rows;
+    try{ rows=await jgetRetry(u,null,"Census ACS API"); }
+    catch(e){ // direct access blocked — last resort: public CORS proxy (public data only)
+      setStatus("②b Census API blocked on this network — retrying via public CORS proxy…");
+      rows=await jget(corsProxy(u),null,"Census ACS via allorigins.win proxy");
+    }
+    const hdr=rows[0];
     const ix=Object.fromEntries(hdr.map((h,i)=>[h,i]));
     rows.slice(1).forEach(r=>{
       const geoid=r[ix.state]+r[ix.county]+r[ix.tract];
@@ -462,7 +478,7 @@ function drawMap(lat,lon,geo,pois){
     .addTo(layerGroup).bindTooltip(p.name));
   pois.anchors.forEach(a=>L.circleMarker([a.lat,a.lon],{radius:6,color:"#fff",weight:1.5,fillColor:({premium:"#2F7A52",mid:"#3B6EA5",value:"#C07A2E"})[a.tier],fillOpacity:1})
     .addTo(layerGroup).bindTooltip(`${a.label} · ${(a.d/MI).toFixed(1)} mi`));
-  map.fitBounds(L.circle([lat,lon],{radius:5*MI}).getBounds(),{padding:[10,10]});
+  map.fitBounds(L.latLng(lat,lon).toBounds(10*MI),{padding:[10,10]}); // 10mi-wide box = 5mi radius view
 }
 function scoreColor(s){return s>=70?"var(--good)":s>=45?"var(--mid)":"var(--bad)";}
 function verdictText(s){return s>=80?"Strong trade area":s>=65?"Solid trade area":s>=45?"Mixed signals":s>=30?"Weak fit":"Poor fit";}
@@ -523,7 +539,7 @@ async function runAssessment(lat,lon,placeLabel){
     const road=await fetchRoads(lat,lon).catch(()=>({score:null,label:"unavailable"}));
     const agg=aggregate(acs,geo);
     lastRun={lat,lon,agg,pois,road:(road.score==null?{score:null,label:"unavailable"}:road),placeLabel};
-    drawMap(lat,lon,geo,pois);
+    try{ drawMap(lat,lon,geo,pois); }catch(e){ console.error("map draw failed:",e); } // never block scoring on a render issue
     rescore();
     setStatus("Done. Change the profile to re-score instantly, or click a new spot.");
   }catch(e){
@@ -549,6 +565,31 @@ $("#goBtn").addEventListener("click",async()=>{
   catch(e){ setStatus("Error: "+e.message,true); }
 });
 $("#addr").addEventListener("keydown",e=>{if(e.key==="Enter")$("#goBtn").click();});
+
+/* ================= connectivity diagnostics ================= */
+const DIAG_TESTS=[
+  ["Leaflet CDN (unpkg)","https://unpkg.com/leaflet@1.9.4/package.json"],
+  ["Nominatim geocoder","https://nominatim.openstreetmap.org/status?format=json"],
+  ["FCC Area API","https://geo.fcc.gov/api/census/area?lat=35.2271&lon=-80.8431&censusYear=2020&format=json"],
+  ["Census geocoder","https://geocoding.geo.census.gov/geocoder/geographies/coordinates?x=-80.8431&y=35.2271&benchmark=Public_AR_Current&vintage=Current_Current&layers=Census%20Tracts&format=json"],
+  ["Census ACS API","https://api.census.gov/data/"+ACS_YEAR+"/acs/acs5?get=NAME&for=state:37"],
+  ["TIGERweb boundaries","https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Tracts_Blocks/MapServer?f=json"],
+  ["Overpass (overpass-api.de)","https://overpass-api.de/api/status"],
+  ["Overpass (kumi.systems)","https://overpass.kumi.systems/api/status"],
+  ["CORS proxy (allorigins.win)","https://api.allorigins.win/raw?url="+encodeURIComponent("https://api.census.gov/data/"+ACS_YEAR+"/acs/acs5?get=NAME&for=state:37")],
+];
+async function runDiag(){
+  setStatus("Running connectivity check (9 hosts)…");
+  const lines=[];
+  for(const [name,url] of DIAG_TESTS){
+    try{ const r=await fetch(url); lines.push((r.ok?"✓ ":"✗ ")+name+(r.ok?"":"  (HTTP "+r.status+")")); }
+    catch(e){ lines.push("✗ "+name+"  — blocked/unreachable"); }
+    setStatus("Connectivity check:\n"+lines.join("\n"));
+  }
+  setStatus("Connectivity check:\n"+lines.join("\n")+
+    "\nAnything with ✗ is being blocked by your browser extensions, network, or a local file:// origin.");
+}
+$("#diagLink").addEventListener("click",e=>{e.preventDefault();runDiag();});
 
 /* ================= bootstrap: ensure Leaflet, with CDN fallbacks ================= */
 const LEAFLET_FALLBACKS=[
