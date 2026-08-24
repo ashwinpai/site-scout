@@ -12,16 +12,6 @@ A single-file, zero-backend web tool that scores any US location 0–100 for ret
 | OpenStreetMap Overpass | Anchor brand locations (Costco, Chick-fil-A, Trader Joe's, 25 brands) + food/retail POI density |
 | OSM Nominatim | Address geocoding |
 
-## Deploy to GitHub Pages (5 minutes)
-
-1. **Create the repo.** On github.com → New repository → name it (e.g. `site-scout`) → Public → Create.
-2. **Add the file.** Click "uploading an existing file" (or *Add file → Upload files*) and upload `index.html` and this `README.md`. Commit to `main`.
-3. **Enable Pages.** Repo → *Settings → Pages* → under "Build and deployment", Source = **Deploy from a branch**, Branch = **main**, folder = **/ (root)** → Save.
-4. **Wait ~1 minute**, then open `https://<your-username>.github.io/site-scout/`.
-
-That's it — no build step, no secrets, no server. To update, just edit `index.html` in the GitHub web editor and commit.
-
-**Test locally first (optional):** `python3 -m http.server` in the folder, then open `http://localhost:8000`. (Opening the file directly via `file://` also works for most browsers since all APIs are CORS-enabled.)
 
 ## How to use it
 
@@ -60,14 +50,6 @@ Percentile benchmarks are approximate national tract-level distributions (ACS ~2
 - **Rings, not drive times** — isochrones need an OpenRouteService key (free tier); wire-in point is `sampleTracts()`.
 - **Shared free endpoints** — Overpass/Nominatim are community servers (~1 req/sec fair use). Fine for personal use; if it ever errors, wait a few seconds and retry. The keyless Census API allows 500 calls/day per IP; paste a free key into `ACS_KEY` at the top of the script to lift it.
 - **US only** (Census data).
-
-## Roadmap (Phases from our build plan)
-
-- [x] **Phase 1–3**: map + geocoding + ring sampling + ACS demographics + POI overlay + profile scoring + explainability
-- [ ] **Phase 4a**: drive-time isochrones (OpenRouteService)
-- [ ] **Phase 4b**: daytime population (Census LODES, precomputed static layer)
-- [ ] **Phase 4c**: growth trend (compare two ACS vintages)
-- [ ] **Phase 4d**: real AADT layer for your state, shareable URLs (`?lat=&lon=&profile=`)
 
 ## Architecture (for future edits)
 
