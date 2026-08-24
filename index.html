@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Site Scout — Retail Trade-Area Assessor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root{
+    --paper:#F2F4EF;        /* pale field-map paper */
+    --panel:#FFFFFF;
+    --ink:#1C2620;          /* survey ink */
+    --ink-soft:#5A6B62;
+    --pine:#2C5E4F;         /* topo pine accent */
+    --pine-soft:#E3ECE7;
+    --contour:#A87A1F;      /* contour-line gold */
+    --line:#D8DED6;
+    --bad:#B0402F; --mid:#C08A1E; --good:#2F7A52;
+    --mono:'IBM Plex Mono',monospace;
+    --sans:'Instrument Sans',system-ui,sans-serif;
+    --disp:'Bricolage Grotesque',var(--sans);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:var(--sans);color:var(--ink);background:var(--paper)}
+  .app{display:flex;height:100vh}
+  /* ---------- Sidebar ---------- */
+  .side{width:430px;min-width:430px;overflow-y:auto;background:var(--paper);border-right:1px solid var(--line);padding:22px 22px 40px}
+  .brand{display:flex;align-items:baseline;gap:10px;margin-bottom:2px}
+  .brand h1{font-family:var(--disp);font-weight:800;font-size:26px;letter-spacing:-.5px}
+  .brand .tick{font-family:var(--mono);font-size:11px;color:var(--contour);letter-spacing:2px}
+  .tag{font-size:12.5px;color:var(--ink-soft);margin-bottom:18px;line-height:1.45}
+  .field{margin-bottom:12px}
+  label{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--ink-soft);margin-bottom:5px}
+  input[type=text],select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:6px;font-family:var(--sans);font-size:14px;background:var(--panel);color:var(--ink)}
+  input[type=text]:focus,select:focus{outline:2px solid var(--pine);outline-offset:1px}
+  .row{display:flex;gap:8px}
+  button.go{flex:0 0 auto;padding:10px 18px;border:none;border-radius:6px;background:var(--pine);color:#fff;font-family:var(--sans);font-weight:600;font-size:14px;cursor:pointer}
+  button.go:hover{background:#24503f}
+  button.go:disabled{background:#9AB0A6;cursor:wait}
+  .hint{font-size:12px;color:var(--ink-soft);margin-top:6px}
+  .status{font-family:var(--mono);font-size:11.5px;color:var(--pine);min-height:18px;margin:10px 0 4px;white-space:pre-line}
+  .status.err{color:var(--bad)}
+  /* ---------- Score stamp (signature element) ---------- */
+  .stamp-wrap{display:flex;align-items:center;gap:18px;margin:16px 0 8px}
+  .stamp{position:relative;width:150px;height:150px;flex:0 0 auto}
+  .stamp svg{width:100%;height:100%}
+  .stamp .num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--mono)}
+  .stamp .num b{font-size:40px;font-weight:600;line-height:1}
+  .stamp .num span{font-size:9px;letter-spacing:2px;color:var(--ink-soft);margin-top:3px}
+  .verdict{font-family:var(--disp);font-weight:700;font-size:19px;line-height:1.25}
+  .verdict small{display:block;font-family:var(--sans);font-weight:400;font-size:12.5px;color:var(--ink-soft);margin-top:5px;line-height:1.45}
+  /* ---------- Sections ---------- */
+  .sec{margin-top:20px;border-top:1px solid var(--line);padding-top:14px}
+  .sec h2{font-family:var(--mono);font-size:11px;letter-spacing:1.8px;text-transform:uppercase;color:var(--ink-soft);margin-bottom:10px}
+  table.brk{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.brk th{font-family:var(--mono);font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:var(--ink-soft);text-align:left;padding:4px 4px;border-bottom:1px solid var(--line)}
+  table.brk td{padding:6px 4px;border-bottom:1px dashed var(--line);vertical-align:top}
+  table.brk td.num{font-family:var(--mono);font-size:12px;text-align:right;white-space:nowrap}
+  .bar{height:5px;border-radius:3px;background:var(--pine-soft);position:relative;margin-top:4px}
+  .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--pine)}
+  .pill{display:inline-block;font-family:var(--mono);font-size:10px;padding:1px 7px;border-radius:9px;border:1px solid var(--line);color:var(--ink-soft)}
+  .anchor-list{list-style:none;font-size:13px}
+  .anchor-list li{display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line)}
+  .anchor-list .d{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);white-space:nowrap}
+  .tier-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px}
+  .ctx{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .ctx .cell{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+  .ctx .cell b{display:block;font-family:var(--mono);font-size:15px;font-weight:600}
+  .ctx .cell span{font-size:10.5px;color:var(--ink-soft)}
+  .caveat{font-size:11.5px;color:var(--ink-soft);line-height:1.55;background:var(--pine-soft);border-radius:6px;padding:10px 12px}
+  .empty{font-size:13px;color:var(--ink-soft);padding:8px 0}
+  /* ---------- Map ---------- */
+  .mapwrap{flex:1;position:relative}
+  #map{position:absolute;inset:0;background:#DDE3DA}
+  .legend{position:absolute;z-index:900;bottom:14px;right:12px;background:rgba(255,255,255,.93);border:1px solid var(--line);border-radius:6px;padding:8px 12px;font-size:11.5px;line-height:1.7}
+  .poi-label{font-family:var(--mono);font-size:10px;background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:4px;padding:1px 4px;white-space:nowrap}
+  @media (max-width:860px){
+    .app{flex-direction:column;height:auto}
+    .side{width:100%;min-width:0;order:2}
+    .mapwrap{order:1;height:55vh;position:relative}
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .stamp svg circle.arc{transition:stroke-dashoffset .9s ease}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><h1>Site Scout</h1><span class="tick">TRADE-AREA ASSAY</span></div>
+    <p class="tag">Enter an address or click the map. Site Scout pulls Census demographics for the surrounding tracts, maps nearby anchor retailers from OpenStreetMap, and scores the area 0–100 for the retail archetype you choose.</p>
+
+    <div class="field">
+      <label for="addr">Address or place</label>
+      <div class="row">
+        <input type="text" id="addr" placeholder="e.g. 4400 Sharon Rd, Charlotte, NC" />
+        <button class="go" id="goBtn">Assess</button>
+      </div>
+      <div class="hint">…or just click anywhere on the map.</div>
+    </div>
+
+    <div class="field">
+      <label for="profile">Scoring profile (retail archetype)</label>
+      <select id="profile">
+        <option value="general">General retail vitality</option>
+        <option value="premium">Premium grocer (Whole Foods / Trader Joe's style)</option>
+        <option value="familyqsr">Family QSR (Chick-fil-A style)</option>
+        <option value="coffee">Coffee / café (Starbucks style)</option>
+        <option value="value">Value retail (Dollar General style)</option>
+      </select>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div id="results" style="display:none">
+      <div class="stamp-wrap">
+        <div class="stamp">
+          <svg viewBox="0 0 150 150" aria-hidden="true">
+            <circle cx="75" cy="75" r="70" fill="none" stroke="var(--line)" stroke-width="1.5" stroke-dasharray="2 5"/>
+            <circle cx="75" cy="75" r="60" fill="none" stroke="var(--pine-soft)" stroke-width="9"/>
+            <circle class="arc" id="scoreArc" cx="75" cy="75" r="60" fill="none" stroke="var(--pine)" stroke-width="9"
+                    stroke-linecap="round" stroke-dasharray="377" stroke-dashoffset="377"
+                    transform="rotate(-90 75 75)"/>
+          </svg>
+          <div class="num"><b id="scoreNum">–</b><span id="scoreLabel">SCORE / 100</span></div>
+        </div>
+        <div class="verdict"><span id="verdictTxt"></span><small id="verdictSub"></small></div>
+      </div>
+
+      <div class="sec">
+        <h2>Why this score</h2>
+        <table class="brk" id="brkTable">
+          <thead><tr><th>Signal</th><th>Value</th><th style="text-align:right">Pctile</th><th style="text-align:right">Wt</th><th style="text-align:right">Pts</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="sec">
+        <h2>Anchor brands within 5 mi <span class="pill" id="anchorCount"></span></h2>
+        <ul class="anchor-list" id="anchorList"></ul>
+      </div>
+
+      <div class="sec">
+        <h2>Trade-area context</h2>
+        <div class="ctx" id="ctxGrid"></div>
+      </div>
+
+      <div class="sec">
+        <h2>Caveats</h2>
+        <div class="caveat">
+          Demographics are population-weighted averages of the Census tracts sampled inside a 2.5-mile ring (ACS 5-year estimates; small-area figures carry sampling error). Percentiles use approximate national tract-level benchmarks embedded in this tool. Retailer locations come from OpenStreetMap and may be incomplete or stale. Road access is a proxy for traffic counts, not measured AADT. This is a research toy, not underwriting.
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="mapwrap">
+    <div id="map" role="application" aria-label="Interactive site map"></div>
+    <div class="legend">
+      <div><span class="tier-dot" style="background:var(--good)"></span>Premium anchor</div>
+      <div><span class="tier-dot" style="background:#3B6EA5"></span>Mid-market anchor</div>
+      <div><span class="tier-dot" style="background:#C07A2E"></span>Value anchor</div>
+      <div><span class="tier-dot" style="background:#9AA5A0"></span>Other food/retail (2 mi)</div>
+      <div style="margin-top:3px;border-top:1px solid var(--line);padding-top:3px">Rings: 1 / 3 / 5 mi · dashed = tracts</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* =====================================================================
+   SITE SCOUT — single-file trade-area assessment tool
+   Data: US Census ACS 5-yr API, FCC Area API (point→tract),
+         TIGERweb (tract geometry/area), OpenStreetMap Overpass (POIs),
+         Nominatim (geocoding). All free, keyless, CORS-enabled.
+   ===================================================================== */
+
+const ACS_YEAR = 2023;              // ACS 5-year vintage
+const ACS_KEY  = "";                // optional: paste a free key from api.census.gov to lift the 500 req/day IP limit
+const MI = 1609.344;                // meters per mile
+
+/* ---------- Anchor brand catalog (from the site-selection research) ---------- */
+const ANCHORS = [
+  {rx:/trader\s*joe/i,        label:"Trader Joe's",   tier:"premium"},
+  {rx:/whole\s*foods/i,       label:"Whole Foods",    tier:"premium"},
+  {rx:/costco/i,              label:"Costco",         tier:"premium"},
+  {rx:/wegmans/i,             label:"Wegmans",        tier:"premium"},
+  {rx:/chick.?fil.?a/i,       label:"Chick-fil-A",    tier:"premium"},
+  {rx:/in.?n.?out/i,          label:"In-N-Out",       tier:"premium"},
+  {rx:/\bh-?e-?b\b/i,         label:"H-E-B",          tier:"premium"},
+  {rx:/starbucks/i,           label:"Starbucks",      tier:"mid"},
+  {rx:/chipotle/i,            label:"Chipotle",       tier:"mid"},
+  {rx:/panera/i,              label:"Panera",         tier:"mid"},
+  {rx:/\btarget\b/i,          label:"Target",         tier:"mid"},
+  {rx:/publix/i,              label:"Publix",         tier:"mid"},
+  {rx:/\baldi\b/i,            label:"Aldi",           tier:"mid"},
+  {rx:/wawa/i,                label:"Wawa",           tier:"mid"},
+  {rx:/quik.?trip/i,          label:"QuikTrip",       tier:"mid"},
+  {rx:/buc.?ee/i,             label:"Buc-ee's",       tier:"mid"},
+  {rx:/home\s*depot/i,        label:"Home Depot",     tier:"mid"},
+  {rx:/lowe'?s/i,             label:"Lowe's",         tier:"mid"},
+  {rx:/mcdonald/i,            label:"McDonald's",     tier:"mid"},
+  {rx:/\bcvs\b/i,             label:"CVS",            tier:"mid"},
+  {rx:/walgreens/i,           label:"Walgreens",      tier:"mid"},
+  {rx:/walmart/i,             label:"Walmart",        tier:"value"},
+  {rx:/dollar\s*general/i,    label:"Dollar General", tier:"value"},
+  {rx:/dollar\s*tree/i,       label:"Dollar Tree",    tier:"value"},
+  {rx:/family\s*dollar/i,     label:"Family Dollar",  tier:"value"},
+];
+const BRAND_RX = "trader joe|whole foods|costco|wegmans|chick.?fil.?a|in.?n.?out|h-e-b|heb |starbucks|chipotle|panera|target|publix|aldi|wawa|quiktrip|buc.?ee|home depot|lowe's|mcdonald|cvs|walgreens|walmart|dollar general|dollar tree|family dollar";
+
+/* ---------- Approx national tract-level percentile benchmarks (ACS ~2023) ---------- */
+const BENCH = {
+  income:  [[25000,5],[38000,10],[52000,25],[70000,50],[95000,75],[125000,90],[175000,98]],
+  edu:     [[0.05,5],[0.09,10],[0.16,25],[0.28,50],[0.45,75],[0.62,90],[0.78,98]],
+  density: [[50,5],[150,10],[800,25],[2500,50],[5800,75],[13000,90],[40000,98]],
+  family:  [[0.30,5],[0.40,10],[0.52,25],[0.64,50],[0.74,75],[0.81,90],[0.88,98]],
+  homeown: [[0.10,5],[0.22,10],[0.45,25],[0.66,50],[0.80,75],[0.90,90],[0.96,98]],
+};
+
+/* ---------- Scoring profiles (weights sum to 1; inv = invert percentile) ---------- */
+const PROFILES = {
+  general:  {name:"General retail vitality",
+             w:{income:.16, edu:.14, density:.13, family:.08, homeown:.07, cotenancy:.18, access:.12, vitality:.12}},
+  premium:  {name:"Premium grocer archetype",
+             w:{income:.24, edu:.26, density:.12, family:.04, homeown:.06, cotenancy:.16, access:.08, vitality:.04}},
+  familyqsr:{name:"Family QSR archetype",
+             w:{income:.14, edu:.05, density:.13, family:.18, homeown:.08, cotenancy:.16, access:.18, vitality:.08}},
+  coffee:   {name:"Coffee / café archetype",
+             w:{income:.14, edu:.20, density:.20, family:.02, homeown:.04, cotenancy:.14, access:.16, vitality:.10}},
+  value:    {name:"Value retail archetype", inv:["income","edu"],
+             w:{income:.26, edu:.10, density:.16, family:.10, homeown:.06, cotenancy:.08, access:.14, vitality:.10}},
+};
+const SIGNAL_META = {
+  income:   {label:"Household income",     fmt:v=>"$"+Math.round(v).toLocaleString()},
+  edu:      {label:"Bachelor's+ share",    fmt:v=>(v*100).toFixed(0)+"%"},
+  density:  {label:"Population density",   fmt:v=>Math.round(v).toLocaleString()+"/mi²"},
+  family:   {label:"Family households",    fmt:v=>(v*100).toFixed(0)+"%"},
+  homeown:  {label:"Homeownership",        fmt:v=>(v*100).toFixed(0)+"%"},
+  cotenancy:{label:"Anchor co-tenancy",    fmt:v=>v.raw+" anchors ("+v.prem+" premium)"},
+  access:   {label:"Road access (proxy)",  fmt:v=>v},
+  vitality: {label:"Retail vitality (2 mi)",fmt:v=>v+" food/retail POIs"},
+};
+
+/* ================= helpers ================= */
+const $ = s=>document.querySelector(s);
+const setStatus=(t,err)=>{const el=$("#status");el.textContent=t;el.className="status"+(err?" err":"")};
+const pctile = (v,bp)=>{ if(v==null||isNaN(v))return null;
+  if(v<=bp[0][0])return Math.max(2,bp[0][1]*v/bp[0][0]);
+  for(let i=1;i<bp.length;i++){ if(v<=bp[i][0]){const [x0,y0]=bp[i-1],[x1,y1]=bp[i];return y0+(y1-y0)*(v-x0)/(x1-x0);} }
+  return 98; };
+const hav=(a,b,c,d)=>{const R=6371000,r=x=>x*Math.PI/180,dp=r(c-a),dl=r(d-b),
+  h=Math.sin(dp/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dl/2)**2;return 2*R*Math.asin(Math.sqrt(h));};
+const dest=(lat,lon,brg,dist)=>{const R=6371000,r=x=>x*Math.PI/180,g=x=>x*180/Math.PI,
+  p=r(lat),l=r(lon),t=r(brg),dR=dist/R,
+  p2=Math.asin(Math.sin(p)*Math.cos(dR)+Math.cos(p)*Math.sin(dR)*Math.cos(t)),
+  l2=l+Math.atan2(Math.sin(t)*Math.sin(dR)*Math.cos(p),Math.cos(dR)-Math.sin(p)*Math.sin(p2));
+  return [g(p2),g(l2)];};
+const acsNum=v=>{const n=parseFloat(v);return (isNaN(n)||n<-100000)?null:n;};
+async function jget(url,opts,label){
+  const who=label||new URL(url).host; let r;
+  try{ r=await fetch(url,opts); }
+  catch(e){ throw new Error(who+" unreachable (network/CORS block)"); }
+  if(!r.ok)throw new Error(who+" returned HTTP "+r.status);
+  return r.json();
+}
+
+/* ================= map (initialized only after Leaflet is confirmed loaded) ================= */
+let map=null, layerGroup=null;
+function initMap(){
+  map=L.map("map",{zoomControl:true}).setView([35.2271,-80.8431],11); // Charlotte default
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+  layerGroup=L.layerGroup().addTo(map);
+  map.on("click",e=>runAssessment(e.latlng.lat,e.latlng.lng,null));
+}
+
+/* ================= data fetchers ================= */
+async function geocode(q){
+  try{
+    const js=await jget(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(q)}`,null,"Nominatim");
+    if(js.length)return {lat:+js[0].lat, lon:+js[0].lon, label:js[0].display_name};
+  }catch(e){/* fall back to Census geocoder */}
+  const u=`https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(q)}&benchmark=Public_AR_Current&format=json`;
+  const js=await jget(u,null,"Census geocoder");
+  const m=js.result&&js.result.addressMatches&&js.result.addressMatches[0];
+  if(!m)throw new Error("Address not found — try adding city/state.");
+  return {lat:m.coordinates.y, lon:m.coordinates.x, label:m.matchedAddress};
+}
+async function pointToTract(lat,lon){
+  try{ // primary: FCC Area API
+    const js=await jget(`https://geo.fcc.gov/api/census/area?lat=${lat}&lon=${lon}&censusYear=2020&format=json`,null,"FCC Area API");
+    const r=js.results&&js.results[0];
+    if(r&&r.block_fips)return r.block_fips.slice(0,11);   // 11-digit tract GEOID
+  }catch(e){/* fall back to Census geocoder */}
+  const u=`https://geocoding.geo.census.gov/geocoder/geographies/coordinates?x=${lon}&y=${lat}`+
+          `&benchmark=Public_AR_Current&vintage=Current_Current&layers=Census%20Tracts&format=json`;
+  const js=await jget(u,null,"Census geocoder");
+  const t=js.result&&js.result.geographies&&js.result.geographies["Census Tracts"];
+  return (t&&t[0])? t[0].GEOID : null;
+}
+async function sampleTracts(lat,lon){
+  // center + 6 points @1mi + 8 points @2.5mi = 15 probes, max 5 in flight to avoid throttling
+  const pts=[[lat,lon]];
+  for(let i=0;i<6;i++)pts.push(dest(lat,lon,i*60,1*MI));
+  for(let i=0;i<8;i++)pts.push(dest(lat,lon,i*45,2.5*MI));
+  const ids=[], CONC=5;
+  for(let i=0;i<pts.length;i+=CONC){
+    const chunk=await Promise.all(pts.slice(i,i+CONC).map(p=>pointToTract(p[0],p[1]).catch(()=>null)));
+    ids.push(...chunk);
+  }
+  const uniq=[...new Set(ids.filter(Boolean))];
+  if(!uniq.length)throw new Error("tract lookup failed at every sample point — FCC Area API and Census geocoder both unreachable, or location is outside the US");
+  return uniq;
+}
+async function fetchACS(tractIds){
+  const vars=["B19013_001E","B01003_001E","B15003_001E","B15003_022E","B15003_023E","B15003_024E","B15003_025E",
+              "B01002_001E","B11001_001E","B11001_002E","B25003_001E","B25003_002E","B25077_001E"];
+  const byCounty={};
+  tractIds.forEach(g=>{const k=g.slice(0,2)+"|"+g.slice(2,5);(byCounty[k]=byCounty[k]||[]).push(g.slice(5));});
+  const out={};
+  for(const k of Object.keys(byCounty)){
+    const [st,co]=k.split("|");
+    const u=`https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=${vars.join(",")}`+
+            `&for=tract:*&in=${encodeURIComponent(`state:${st} county:${co}`)}`+(ACS_KEY?`&key=${ACS_KEY}`:"");
+    const rows=await jget(u,null,"Census ACS API"); const hdr=rows[0];
+    const ix=Object.fromEntries(hdr.map((h,i)=>[h,i]));
+    rows.slice(1).forEach(r=>{
+      const geoid=r[ix.state]+r[ix.county]+r[ix.tract];
+      if(!tractIds.includes(geoid))return;
+      out[geoid]={
+        income:acsNum(r[ix.B19013_001E]), pop:acsNum(r[ix.B01003_001E]),
+        pop25:acsNum(r[ix.B15003_001E]),
+        bach:(acsNum(r[ix.B15003_022E])||0)+(acsNum(r[ix.B15003_023E])||0)+(acsNum(r[ix.B15003_024E])||0)+(acsNum(r[ix.B15003_025E])||0),
+        age:acsNum(r[ix.B01002_001E]),
+        hh:acsNum(r[ix.B11001_001E]), famhh:acsNum(r[ix.B11001_002E]),
+        occ:acsNum(r[ix.B25003_001E]), own:acsNum(r[ix.B25003_002E]),
+        homeval:acsNum(r[ix.B25077_001E]),
+      };
+    });
+  }
+  return out;
+}
+let tractLayerId=null;
+async function fetchTractGeo(tractIds){
+  const base="https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Tracts_Blocks/MapServer";
+  if(tractLayerId==null){
+    const meta=await jget(base+"?f=json");
+    const lyr=(meta.layers||[]).find(l=>/census tracts/i.test(l.name));
+    if(!lyr)throw new Error("tract layer not found");
+    tractLayerId=lyr.id;
+  }
+  const where=`GEOID IN (${tractIds.map(g=>`'${g}'`).join(",")})`;
+  const u=`${base}/${tractLayerId}/query?where=${encodeURIComponent(where)}&outFields=GEOID,AREALAND&returnGeometry=true&outSR=4326&f=json`;
+  const js=await jget(u);
+  return (js.features||[]).map(f=>({
+    geoid:f.attributes.GEOID, aland:+f.attributes.AREALAND||null,
+    rings:(f.geometry&&f.geometry.rings||[]).map(r=>r.map(([x,y])=>[y,x]))
+  }));
+}
+const OVERPASS_MIRRORS=["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"];
+async function overpass(q){
+  let lastErr;
+  for(const u of OVERPASS_MIRRORS){
+    try{ return await jget(u,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},
+                              body:"data="+encodeURIComponent(q)},"Overpass ("+new URL(u).host+")"); }
+    catch(e){ lastErr=e; }
+  }
+  throw lastErr;
+}
+async function fetchPOIs(lat,lon){
+  const q=`[out:json][timeout:30];
+(
+  nwr(around:${5*MI|0},${lat},${lon})["brand"~"${BRAND_RX}",i];
+  nwr(around:${5*MI|0},${lat},${lon})["name"~"${BRAND_RX}",i]["shop"];
+  nwr(around:${5*MI|0},${lat},${lon})["name"~"${BRAND_RX}",i]["amenity"];
+  nwr(around:${2*MI|0},${lat},${lon})["shop"~"^(supermarket|convenience|department_store|variety_store)$"];
+  nwr(around:${2*MI|0},${lat},${lon})["amenity"~"^(fast_food|restaurant|cafe)$"];
+);
+out center 600;`;
+  const js=await overpass(q);
+  const seen=new Set(), anchors=[], others=[];
+  (js.elements||[]).forEach(el=>{
+    const key=el.type+el.id; if(seen.has(key))return; seen.add(key);
+    const la=el.lat??el.center?.lat, lo=el.lon??el.center?.lon; if(la==null)return;
+    const nm=(el.tags?.brand||el.tags?.name||"").trim(); if(!nm)return;
+    const hit=ANCHORS.find(a=>a.rx.test(nm));
+    const d=hav(lat,lon,la,lo);
+    if(hit&&d<=5*MI) anchors.push({label:hit.label,tier:hit.tier,name:nm,lat:la,lon:lo,d});
+    else if(d<=2*MI) others.push({name:nm,lat:la,lon:lo,d});
+  });
+  // keep one nearest per brand for the roster, but map all anchor pins
+  anchors.sort((a,b)=>a.d-b.d);
+  return {anchors, others:others.slice(0,150)};
+}
+async function fetchRoads(lat,lon){
+  const q=`[out:json][timeout:20];
+way(around:600,${lat},${lon})["highway"~"^(motorway|trunk|primary|secondary)$"];
+out tags 40;`;
+  const js=await overpass(q);
+  const classes=new Set((js.elements||[]).map(e=>e.tags?.highway).filter(Boolean));
+  if(classes.has("motorway")||classes.has("trunk"))return {score:100,label:"Highway/trunk ≤0.4 mi"};
+  if(classes.has("primary"))return {score:80,label:"Primary arterial ≤0.4 mi"};
+  if(classes.has("secondary"))return {score:60,label:"Secondary road ≤0.4 mi"};
+  return {score:30,label:"Local streets only"};
+}
+
+/* ================= aggregation & scoring ================= */
+function aggregate(acs, geo){
+  const rows=Object.entries(acs).map(([g,v])=>({g,...v,aland:(geo.find(t=>t.geoid===g)||{}).aland}));
+  const wsum=(val,wt)=>{let n=0,dsum=0;rows.forEach(r=>{const v=r[val],w=r[wt];if(v!=null&&w){n+=v*w;dsum+=w;}});return dsum?n/dsum:null;};
+  const totPop=rows.reduce((s,r)=>s+(r.pop||0),0);
+  const totLand=rows.reduce((s,r)=>s+(r.aland||0),0);
+  return {
+    income: wsum("income","hh"),
+    edu: (()=>{const b=rows.reduce((s,r)=>s+(r.bach||0),0),p=rows.reduce((s,r)=>s+(r.pop25||0),0);return p?b/p:null;})(),
+    family:(()=>{const f=rows.reduce((s,r)=>s+(r.famhh||0),0),h=rows.reduce((s,r)=>s+(r.hh||0),0);return h?f/h:null;})(),
+    homeown:(()=>{const o=rows.reduce((s,r)=>s+(r.own||0),0),c=rows.reduce((s,r)=>s+(r.occ||0),0);return c?o/c:null;})(),
+    density: totLand? totPop/(totLand/2589988.11) : null,   // people per sq mile
+    age: wsum("age","pop"), homeval: wsum("homeval","occ"),
+    pop:totPop, tracts:rows.length,
+  };
+}
+function scoreArea(agg, pois, road, profileKey){
+  const prof=PROFILES[profileKey];
+  const uniq={}; pois.anchors.forEach(a=>{if(!uniq[a.label]||a.d<uniq[a.label].d)uniq[a.label]=a;});
+  const roster=Object.values(uniq).sort((a,b)=>a.d-b.d);
+  const prem=roster.filter(a=>a.tier==="premium").length;
+  const cotenRaw={raw:roster.length,prem};
+  const signals={
+    income:{v:agg.income, p:pctile(agg.income,BENCH.income)},
+    edu:{v:agg.edu, p:pctile(agg.edu,BENCH.edu)},
+    density:{v:agg.density, p:pctile(agg.density,BENCH.density)},
+    family:{v:agg.family, p:pctile(agg.family,BENCH.family)},
+    homeown:{v:agg.homeown, p:pctile(agg.homeown,BENCH.homeown)},
+    cotenancy:{v:cotenRaw, p:Math.min(100, prem*12 + (roster.length-prem)*6)},
+    access:{v:road.label, p:road.score},
+    vitality:{v:pois.others.length, p:Math.min(100, pois.others.length*1.2)},
+  };
+  (prof.inv||[]).forEach(k=>{ if(signals[k].p!=null) signals[k].p=100-signals[k].p; signals[k].inverted=true; });
+  let total=0, wUsed=0, rowsOut=[];
+  Object.entries(prof.w).forEach(([k,w])=>{
+    const s=signals[k];
+    if(s.p==null){rowsOut.push({k,w,unavailable:true});return;}
+    wUsed+=w; rowsOut.push({k,w,p:s.p,v:s.v,inverted:s.inverted});
+  });
+  rowsOut.forEach(r=>{ if(!r.unavailable){ r.wNorm=r.w/wUsed; r.pts=r.p*r.wNorm; total+=r.pts; } });
+  return {score:Math.round(total), rows:rowsOut, roster, signals};
+}
+
+/* ================= rendering ================= */
+const tierColor={premium:"var(--good)",mid:"#3B6EA5",value:"#C07A2E"};
+function drawMap(lat,lon,geo,pois){
+  layerGroup.clearLayers();
+  [1,3,5].forEach(mi=>L.circle([lat,lon],{radius:mi*MI,color:"var(--pine)",weight:mi===5?1.5:1,opacity:.55,fill:mi===1,fillOpacity:.05}).addTo(layerGroup));
+  geo.forEach(t=>t.rings.forEach(r=>L.polygon(r,{color:"#8A9A90",weight:1,dashArray:"4 4",fill:false,opacity:.7}).addTo(layerGroup)));
+  L.circleMarker([lat,lon],{radius:7,color:"#fff",weight:2,fillColor:"var(--ink)",fillOpacity:1}).addTo(layerGroup).bindTooltip("Assessment point");
+  pois.others.forEach(p=>L.circleMarker([p.lat,p.lon],{radius:3,color:"#9AA5A0",weight:1,fillColor:"#9AA5A0",fillOpacity:.7})
+    .addTo(layerGroup).bindTooltip(p.name));
+  pois.anchors.forEach(a=>L.circleMarker([a.lat,a.lon],{radius:6,color:"#fff",weight:1.5,fillColor:({premium:"#2F7A52",mid:"#3B6EA5",value:"#C07A2E"})[a.tier],fillOpacity:1})
+    .addTo(layerGroup).bindTooltip(`${a.label} · ${(a.d/MI).toFixed(1)} mi`));
+  map.fitBounds(L.circle([lat,lon],{radius:5*MI}).getBounds(),{padding:[10,10]});
+}
+function scoreColor(s){return s>=70?"var(--good)":s>=45?"var(--mid)":"var(--bad)";}
+function verdictText(s){return s>=80?"Strong trade area":s>=65?"Solid trade area":s>=45?"Mixed signals":s>=30?"Weak fit":"Poor fit";}
+function render(result, agg, profileKey, placeLabel){
+  $("#results").style.display="block";
+  const s=result.score, arc=$("#scoreArc");
+  arc.style.stroke=scoreColor(s);
+  requestAnimationFrame(()=>arc.setAttribute("stroke-dashoffset", String(377*(1-s/100))));
+  $("#scoreNum").textContent=s; $("#scoreNum").style.color=scoreColor(s);
+  $("#verdictTxt").textContent=verdictText(s);
+  $("#verdictSub").textContent=`${PROFILES[profileKey].name} · ${placeLabel||"map point"}`;
+  const tb=$("#brkTable tbody"); tb.innerHTML="";
+  result.rows.sort((a,b)=>(b.pts||0)-(a.pts||0)).forEach(r=>{
+    const m=SIGNAL_META[r.k], tr=document.createElement("tr");
+    if(r.unavailable){tr.innerHTML=`<td>${m.label}</td><td colspan="4" style="color:var(--ink-soft)">unavailable — weight redistributed</td>`;}
+    else{
+      const valTxt=(typeof m.fmt==="function")?m.fmt(r.v):r.v;
+      tr.innerHTML=`<td>${m.label}${r.inverted?' <span class="pill">inverted</span>':''}
+        <div class="bar"><i style="width:${r.p.toFixed(0)}%"></i></div></td>
+        <td>${valTxt}</td><td class="num">${r.p.toFixed(0)}</td>
+        <td class="num">${(r.wNorm*100).toFixed(0)}%</td><td class="num"><b>+${r.pts.toFixed(1)}</b></td>`;
+    }
+    tb.appendChild(tr);
+  });
+  const al=$("#anchorList"); al.innerHTML="";
+  $("#anchorCount").textContent=result.roster.length+" brands";
+  if(!result.roster.length)al.innerHTML='<li class="empty">No catalog anchors found within 5 miles.</li>';
+  result.roster.forEach(a=>{
+    const li=document.createElement("li");
+    li.innerHTML=`<span><span class="tier-dot" style="background:${({premium:"#2F7A52",mid:"#3B6EA5",value:"#C07A2E"})[a.tier]}"></span>${a.label}</span><span class="d">${(a.d/MI).toFixed(1)} mi</span>`;
+    al.appendChild(li);
+  });
+  const cells=[
+    [agg.pop? agg.pop.toLocaleString():"–","Population in sampled tracts"],
+    [agg.tracts,"Census tracts sampled"],
+    [agg.age? agg.age.toFixed(1):"–","Median age (weighted)"],
+    [agg.homeval? "$"+Math.round(agg.homeval).toLocaleString():"–","Median home value"],
+  ];
+  $("#ctxGrid").innerHTML=cells.map(c=>`<div class="cell"><b>${c[0]}</b><span>${c[1]}</span></div>`).join("");
+}
+
+/* ================= orchestration ================= */
+let lastRun=null;
+async function runAssessment(lat,lon,placeLabel){
+  if(!map){setStatus("Map library hasn't loaded — check your network/ad-blocker and refresh.",true);return;}
+  const btn=$("#goBtn"); btn.disabled=true;
+  try{
+    setStatus("① Locating Census tracts…");
+    const tracts=await sampleTracts(lat,lon);
+    if(!tracts.length)throw new Error("No Census tracts found here (US only).");
+    setStatus(`② Fetching ACS demographics for ${tracts.length} tracts…`);
+    const acs=await fetchACS(tracts);
+    setStatus("③ Fetching tract boundaries…");
+    let geo=[]; try{geo=await fetchTractGeo(tracts);}catch(e){/* degrade gracefully: no geometry/density */}
+    setStatus("④ Querying OpenStreetMap for retailers…");
+    const pois=await fetchPOIs(lat,lon);
+    setStatus("⑤ Checking road access…");
+    const road=await fetchRoads(lat,lon).catch(()=>({score:null,label:"unavailable"}));
+    const agg=aggregate(acs,geo);
+    lastRun={lat,lon,agg,pois,road:(road.score==null?{score:null,label:"unavailable"}:road),placeLabel};
+    drawMap(lat,lon,geo,pois);
+    rescore();
+    setStatus("Done. Change the profile to re-score instantly, or click a new spot.");
+  }catch(e){
+    console.error(e);
+    const localHint=(location.protocol==="file:")?
+      "\nYou're opening this as a local file (file://) — several APIs block that. Use your GitHub Pages URL, or run: python3 -m http.server":
+      "\nIf this repeats, the named service may be blocked on your network or briefly busy — wait a few seconds and retry.";
+    setStatus("Error: "+e.message+localHint,true);
+  }finally{btn.disabled=false;}
+}
+function rescore(){
+  if(!lastRun)return;
+  const pk=$("#profile").value;
+  const road=lastRun.road.score==null?{score:30,label:"unavailable (default applied)"}:lastRun.road;
+  const res=scoreArea(lastRun.agg,lastRun.pois,road,pk);
+  render(res,lastRun.agg,pk,lastRun.placeLabel);
+}
+$("#profile").addEventListener("change",rescore);
+$("#goBtn").addEventListener("click",async()=>{
+  const q=$("#addr").value.trim(); if(!q){setStatus("Type an address first, or click the map.",true);return;}
+  try{ setStatus("Geocoding…"); const g=await geocode(q);
+       runAssessment(g.lat,g.lon,g.label.split(",").slice(0,3).join(",")); }
+  catch(e){ setStatus("Error: "+e.message,true); }
+});
+$("#addr").addEventListener("keydown",e=>{if(e.key==="Enter")$("#goBtn").click();});
+
+/* ================= bootstrap: ensure Leaflet, with CDN fallbacks ================= */
+const LEAFLET_FALLBACKS=[
+  ["https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js","https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css"],
+  ["https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js","https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"],
+];
+const loadScript=src=>new Promise((res,rej)=>{const s=document.createElement("script");
+  s.src=src;s.onload=res;s.onerror=()=>rej(new Error("failed "+src));document.head.appendChild(s);});
+const loadCss=href=>{const l=document.createElement("link");l.rel="stylesheet";l.href=href;document.head.appendChild(l);};
+(async function boot(){
+  if(!window.L){ // primary CDN (unpkg, in <head>) failed — try fallbacks
+    for(const [js,css] of LEAFLET_FALLBACKS){
+      try{ await loadScript(js); loadCss(css); break; }catch(e){/* try next CDN */}
+    }
+  }
+  if(window.L) initMap();
+  else setStatus("Could not load the Leaflet map library from any CDN.\nCheck your network or ad-blocker, then refresh.",true);
+})();
+</script>
+</body>
+</html>
