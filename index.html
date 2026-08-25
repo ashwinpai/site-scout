@@ -62,7 +62,7 @@
   .bar{height:5px;border-radius:3px;background:var(--pine-soft);position:relative;margin-top:4px}
   .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--pine)}
   .pill{display:inline-block;font-family:var(--mono);font-size:10px;padding:1px 7px;border-radius:9px;border:1px solid var(--line);color:var(--ink-soft)}
-  .anchor-list{list-style:none;font-size:13px}
+  .anchor-list{list-style:none;font-size:13px;max-height:280px;overflow-y:auto}
   .anchor-list li{display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line)}
   .anchor-list .d{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);white-space:nowrap}
   .tier-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px}
@@ -115,6 +115,8 @@
 
     <div class="status" id="status"></div>
     <a href="#" id="diagLink" style="font-size:11.5px;color:var(--pine);display:inline-block;margin-bottom:6px">Run connectivity check</a>
+    <span style="color:var(--line)"> · </span>
+    <a href="#" id="recalLink" style="font-size:11.5px;color:var(--pine);display:inline-block;margin-bottom:6px" title="Fetches every US tract from the Census API (one-time, ~15–30s) and computes exact national percentile benchmarks">Recalibrate benchmarks</a>
 
     <div id="results" style="display:none">
       <div class="stamp-wrap">
@@ -179,46 +181,165 @@
          Nominatim (geocoding). All free, keyless, CORS-enabled.
    ===================================================================== */
 
-const ACS_YEAR = 2023;              // ACS 5-year vintage
-const ACS_KEY  = "88f2de9fff59a251effa4e17a34dd50a0c0c13bc";                // optional: paste a free key from api.census.gov to lift the 500 req/day IP limit
+const ACS_YEAR = 2024;              // 2020–2024 5-yr, released Jan 2026 — newest tract-level vintage; auto-upgrades at boot
+const ACS_KEY  = "88f2de9fff59a251effa4e17a34dd50a0c0c13bc";                // free key from api.census.gov to lift the 500 req/day IP limit
 const MI = 1609.344;                // meters per mile
 
-/* ---------- Anchor brand catalog (from the site-selection research) ---------- */
+/* ---------- Anchor brand catalog ---------- 
+  tier reflects the trade-area archetype each chain targets (per the site-selection research):
+   premium = affluent/educated screens 
+   mid = broad middle market 
+   value = underserved/low-income screens
+  rx = strict JS classifier 
+  q = loose Overpass fetch pattern. 
+  Add a chain = add one line. 
+*/
 const ANCHORS = [
-  {rx:/trader\s*joe/i,        label:"Trader Joe's",   tier:"premium"},
-  {rx:/whole\s*foods/i,       label:"Whole Foods",    tier:"premium"},
-  {rx:/costco/i,              label:"Costco",         tier:"premium"},
-  {rx:/wegmans/i,             label:"Wegmans",        tier:"premium"},
-  {rx:/chick.?fil.?a/i,       label:"Chick-fil-A",    tier:"premium"},
-  {rx:/in.?n.?out/i,          label:"In-N-Out",       tier:"premium"},
-  {rx:/\bh-?e-?b\b/i,         label:"H-E-B",          tier:"premium"},
-  {rx:/starbucks/i,           label:"Starbucks",      tier:"mid"},
-  {rx:/chipotle/i,            label:"Chipotle",       tier:"mid"},
-  {rx:/panera/i,              label:"Panera",         tier:"mid"},
-  {rx:/\btarget\b/i,          label:"Target",         tier:"mid"},
-  {rx:/publix/i,              label:"Publix",         tier:"mid"},
-  {rx:/\baldi\b/i,            label:"Aldi",           tier:"mid"},
-  {rx:/wawa/i,                label:"Wawa",           tier:"mid"},
-  {rx:/quik.?trip/i,          label:"QuikTrip",       tier:"mid"},
-  {rx:/buc.?ee/i,             label:"Buc-ee's",       tier:"mid"},
-  {rx:/home\s*depot/i,        label:"Home Depot",     tier:"mid"},
-  {rx:/lowe'?s/i,             label:"Lowe's",         tier:"mid"},
-  {rx:/mcdonald/i,            label:"McDonald's",     tier:"mid"},
-  {rx:/\bcvs\b/i,             label:"CVS",            tier:"mid"},
-  {rx:/walgreens/i,           label:"Walgreens",      tier:"mid"},
-  {rx:/walmart/i,             label:"Walmart",        tier:"value"},
-  {rx:/dollar\s*general/i,    label:"Dollar General", tier:"value"},
-  {rx:/dollar\s*tree/i,       label:"Dollar Tree",    tier:"value"},
-  {rx:/family\s*dollar/i,     label:"Family Dollar",  tier:"value"},
+// — grocery: premium —
+  {rx:/trader\s*joe/i, q:"trader joe", label:"Trader Joe's", tier:"premium"},
+  {rx:/whole\s*foods/i, q:"whole foods", label:"Whole Foods", tier:"premium"},
+  {rx:/wegmans/i, q:"wegmans", label:"Wegmans", tier:"premium"},
+  {rx:/harris\s*teeter/i, q:"harris teeter", label:"Harris Teeter", tier:"premium"},
+  {rx:/\bfresh market\b/i, q:"fresh market", label:"The Fresh Market", tier:"premium"},
+  {rx:/sprouts/i, q:"sprouts", label:"Sprouts", tier:"premium"},
+  {rx:/\bh-?e-?b\b/i, q:"h-e-b|heb", label:"H-E-B", tier:"premium"},
+  // — grocery: mid —
+  {rx:/publix/i, q:"publix", label:"Publix", tier:"mid"},
+  {rx:/kroger/i, q:"kroger", label:"Kroger", tier:"mid"},
+  {rx:/safeway/i, q:"safeway", label:"Safeway", tier:"mid"},
+  {rx:/albertsons?/i, q:"albertson", label:"Albertsons", tier:"mid"},
+  {rx:/giant\s*food/i, q:"giant", label:"Giant Food", tier:"mid"},
+  {rx:/giant\s*eagle/i, q:"giant", label:"Giant Eagle", tier:"mid"},
+  {rx:/stop\s*(&|and)\s*shop/i, q:"stop & shop|stop and shop", label:"Stop & Shop", tier:"mid"},
+  {rx:/shop\s*rite/i, q:"shoprite|shop rite", label:"ShopRite", tier:"mid"},
+  {rx:/meijer/i, q:"meijer", label:"Meijer", tier:"mid"},
+  {rx:/hy.?vee/i, q:"hy-vee|hyvee", label:"Hy-Vee", tier:"mid"},
+  {rx:/winn.?dixie/i, q:"winn", label:"Winn-Dixie", tier:"mid"},
+  {rx:/\baldi\b/i, q:"aldi", label:"Aldi", tier:"mid"},
+  {rx:/\blidl\b/i, q:"lidl", label:"Lidl", tier:"mid"},
+  // — grocery: value —
+  {rx:/food\s*lion/i, q:"food lion", label:"Food Lion", tier:"value"},
+  {rx:/grocery\s*outlet/i, q:"grocery outlet", label:"Grocery Outlet", tier:"value"},
+  {rx:/save.?a.?lot/i, q:"save-a-lot|save a lot", label:"Save-A-Lot", tier:"value"},
+  {rx:/winco/i, q:"winco", label:"WinCo", tier:"value"},
+  {rx:/piggly/i, q:"piggly", label:"Piggly Wiggly", tier:"value"},
+  // — warehouse clubs —
+  {rx:/costco/i, q:"costco", label:"Costco", tier:"premium"},
+  {rx:/sam.?s\s*club/i, q:"sam's club|sams club", label:"Sam's Club", tier:"mid"},
+  {rx:/bj.?s\s*whole|^bj.?s$/i, q:"bj's", label:"BJ's Wholesale", tier:"mid"},
+  // — QSR / fast casual: premium screens —
+  {rx:/chick.?fil.?a/i, q:"chick", label:"Chick-fil-A", tier:"premium"},
+  {rx:/in.?n.?out/i, q:"in-n-out|in n out", label:"In-N-Out", tier:"premium"},
+  {rx:/shake\s*shack/i, q:"shake shack", label:"Shake Shack", tier:"premium"},
+  {rx:/sweetgreen/i, q:"sweetgreen", label:"Sweetgreen", tier:"premium"},
+  {rx:/\bcava\b/i, q:"cava", label:"CAVA", tier:"premium"},
+  {rx:/first\s*watch/i, q:"first watch", label:"First Watch", tier:"premium"},
+  // — coffee & bakery —
+  {rx:/starbucks/i, q:"starbucks", label:"Starbucks", tier:"mid"},
+  {rx:/dunkin/i, q:"dunkin", label:"Dunkin'", tier:"mid"},
+  {rx:/dutch\s*bros/i, q:"dutch bros", label:"Dutch Bros", tier:"mid"},
+  {rx:/peet.?s/i, q:"peet", label:"Peet's Coffee", tier:"mid"},
+  {rx:/krispy\s*kreme/i, q:"krispy", label:"Krispy Kreme", tier:"mid"},
+  {rx:/tim\s*hortons/i, q:"tim horton", label:"Tim Hortons", tier:"mid"},
+  // — QSR / fast casual: mid —
+  {rx:/panera/i, q:"panera", label:"Panera", tier:"mid"},
+  {rx:/chipotle/i, q:"chipotle", label:"Chipotle", tier:"mid"},
+  {rx:/panda\s*express/i, q:"panda express", label:"Panda Express", tier:"mid"},
+  {rx:/five\s*guys/i, q:"five guys", label:"Five Guys", tier:"mid"},
+  {rx:/culver.?s/i, q:"culver", label:"Culver's", tier:"mid"},
+  {rx:/raising\s*cane/i, q:"raising cane", label:"Raising Cane's", tier:"mid"},
+  {rx:/whataburger/i, q:"whataburger", label:"Whataburger", tier:"mid"},
+  {rx:/zaxby/i, q:"zaxby", label:"Zaxby's", tier:"mid"},
+  {rx:/bojangles/i, q:"bojangles", label:"Bojangles", tier:"mid"},
+  {rx:/jersey\s*mike/i, q:"jersey mike", label:"Jersey Mike's", tier:"mid"},
+  {rx:/jimmy\s*john/i, q:"jimmy john", label:"Jimmy John's", tier:"mid"},
+  {rx:/mcdonald/i, q:"mcdonald", label:"McDonald's", tier:"mid"},
+  {rx:/taco\s*bell/i, q:"taco bell", label:"Taco Bell", tier:"mid"},
+  {rx:/wendy'?s/i, q:"wendy", label:"Wendy's", tier:"mid"},
+  {rx:/burger\s*king/i, q:"burger king", label:"Burger King", tier:"mid"},
+  {rx:/\bkfc\b/i, q:"kfc", label:"KFC", tier:"mid"},
+  {rx:/popeyes?/i, q:"popeye", label:"Popeyes", tier:"mid"},
+  {rx:/\bsonic\b/i, q:"sonic", label:"Sonic", tier:"mid"},
+  {rx:/\bsubway\b/i, q:"subway", label:"Subway", tier:"mid"},
+  // — casual dining —
+  {rx:/applebee/i, q:"applebee", label:"Applebee's", tier:"mid"},
+  {rx:/chili'?s/i, q:"chili's", label:"Chili's", tier:"mid"},
+  {rx:/olive\s*garden/i, q:"olive garden", label:"Olive Garden", tier:"mid"},
+  {rx:/texas\s*roadhouse/i, q:"texas roadhouse", label:"Texas Roadhouse", tier:"mid"},
+  {rx:/outback/i, q:"outback", label:"Outback", tier:"mid"},
+  {rx:/cracker\s*barrel/i, q:"cracker barrel", label:"Cracker Barrel", tier:"mid"},
+  // — QSR: value —
+  {rx:/little\s*caesars?/i, q:"little caesar", label:"Little Caesars", tier:"value"},
+  {rx:/waffle\s*house/i, q:"waffle house", label:"Waffle House", tier:"value"},
+  {rx:/^cook.?out$/i, q:"cook out|cookout", label:"Cook Out", tier:"value"},
+  // — big box / department / specialty —
+  {rx:/\btarget\b/i, q:"target", label:"Target", tier:"mid"},
+  {rx:/nordstrom/i, q:"nordstrom", label:"Nordstrom", tier:"premium"},
+  {rx:/\brei\b/i, q:"rei", label:"REI", tier:"premium"},
+  {rx:/best\s*buy/i, q:"best buy", label:"Best Buy", tier:"mid"},
+  {rx:/dick.?s\s*sporting/i, q:"dick's", label:"Dick's Sporting Goods", tier:"mid"},
+  {rx:/ikea/i, q:"ikea", label:"IKEA", tier:"mid"},
+  {rx:/kohl.?s/i, q:"kohl", label:"Kohl's", tier:"mid"},
+  {rx:/macy.?s/i, q:"macy", label:"Macy's", tier:"mid"},
+  {rx:/t\.?j\.?\s*maxx/i, q:"maxx", label:"TJ Maxx", tier:"mid"},
+  {rx:/\bmarshalls\b/i, q:"marshalls", label:"Marshalls", tier:"mid"},
+  {rx:/home\s*goods/i, q:"homegoods|home goods", label:"HomeGoods", tier:"mid"},
+  {rx:/\bulta\b/i, q:"ulta", label:"Ulta", tier:"mid"},
+  {rx:/sephora/i, q:"sephora", label:"Sephora", tier:"mid"},
+  {rx:/pet\s*smart/i, q:"petsmart", label:"PetSmart", tier:"mid"},
+  {rx:/\bpetco\b/i, q:"petco", label:"Petco", tier:"mid"},
+  {rx:/\bmichaels\b/i, q:"michaels", label:"Michaels", tier:"mid"},
+  {rx:/hobby\s*lobby/i, q:"hobby lobby", label:"Hobby Lobby", tier:"mid"},
+  {rx:/tractor\s*supply/i, q:"tractor supply", label:"Tractor Supply", tier:"mid"},
+  {rx:/home\s*depot/i, q:"home depot", label:"Home Depot", tier:"mid"},
+  {rx:/lowe'?s/i, q:"lowe's", label:"Lowe's", tier:"mid"},
+  {rx:/ace\s*hardware/i, q:"ace hardware", label:"Ace Hardware", tier:"mid"},
+  // — off-price / discount box: value —
+  {rx:/walmart/i, q:"walmart", label:"Walmart", tier:"value"},
+  {rx:/ross\s+(dress|stores)|^ross$/i, q:"ross", label:"Ross", tier:"value"},
+  {rx:/burlington/i, q:"burlington", label:"Burlington", tier:"value"},
+  {rx:/big\s*lots/i, q:"big lots", label:"Big Lots", tier:"value"},
+  {rx:/five\s*below/i, q:"five below", label:"Five Below", tier:"value"},
+  {rx:/harbor\s*freight/i, q:"harbor freight", label:"Harbor Freight", tier:"value"},
+  {rx:/dollar\s*general/i, q:"dollar general", label:"Dollar General", tier:"value"},
+  {rx:/dollar\s*tree/i, q:"dollar tree", label:"Dollar Tree", tier:"value"},
+  {rx:/family\s*dollar/i, q:"family dollar", label:"Family Dollar", tier:"value"},
+  // — pharmacy —
+  {rx:/\bcvs\b/i, q:"cvs", label:"CVS", tier:"mid"},
+  {rx:/walgreens/i, q:"walgreens", label:"Walgreens", tier:"mid"},
+  {rx:/rite\s*aid/i, q:"rite aid", label:"Rite Aid", tier:"mid"},
+  // — convenience / fuel —
+  {rx:/wawa/i, q:"wawa", label:"Wawa", tier:"mid"},
+  {rx:/quik.?trip/i, q:"quiktrip", label:"QuikTrip", tier:"mid"},
+  {rx:/sheetz/i, q:"sheetz", label:"Sheetz", tier:"mid"},
+  {rx:/buc.?ee/i, q:"buc-ee|bucee", label:"Buc-ee's", tier:"mid"},
+  {rx:/casey.?s/i, q:"casey", label:"Casey's", tier:"mid"},
+  {rx:/racetrac/i, q:"racetrac", label:"RaceTrac", tier:"mid"},
+  {rx:/circle\s*k/i, q:"circle k", label:"Circle K", tier:"mid"},
+  {rx:/7.?eleven/i, q:"7-eleven|7 eleven", label:"7-Eleven", tier:"mid"},
+  // — fitness —
+  {rx:/equinox/i, q:"equinox", label:"Equinox", tier:"premium"},
+  {rx:/life\s*time/i, q:"life time|lifetime fitness", label:"Life Time", tier:"premium"},
+  {rx:/la\s*fitness/i, q:"la fitness", label:"LA Fitness", tier:"mid"},
+  {rx:/orange\s*theory/i, q:"orangetheory|orange theory", label:"Orangetheory", tier:"mid"},
+  {rx:/planet\s*fitness/i, q:"planet fitness", label:"Planet Fitness", tier:"value"},
+  // — auto parts (older-vehicle demographic per AutoZone's own criteria) —
+  {rx:/auto\s*zone/i, q:"autozone", label:"AutoZone", tier:"value"},
+  {rx:/o.?reilly/i, q:"o'reilly|oreilly", label:"O'Reilly Auto", tier:"value"},
+  {rx:/advance\s*auto/i, q:"advance auto", label:"Advance Auto", tier:"value"},
 ];
-const BRAND_RX = "trader joe|whole foods|costco|wegmans|chick.?fil.?a|in.?n.?out|h-e-b|heb |starbucks|chipotle|panera|target|publix|aldi|wawa|quiktrip|buc.?ee|home depot|lowe's|mcdonald|cvs|walgreens|walmart|dollar general|dollar tree|family dollar";
-
-/* ---------- Approx national tract-level percentile benchmarks (ACS ~2023) ---------- */
-const BENCH = {
-  income:  [[25000,5],[38000,10],[52000,25],[70000,50],[95000,75],[125000,90],[175000,98]],
-  edu:     [[0.05,5],[0.09,10],[0.16,25],[0.28,50],[0.45,75],[0.62,90],[0.78,98]],
+const BRAND_RX=[...new Set(ANCHORS.map(a=>a.q))].join("|");
+/* ---------- National tract-level percentile benchmarks ----------
+   Defaults = approximate 2020–2024 ACS distributions. 
+   Use the in-app "Recalibrate benchmarks" tool to replace them with exact percentiles
+   computed from every US tract (density stays approximate — it needs
+   land area, which the ACS API doesn't carry). 
+*/
+let BENCH = {
+  income:  [[28000,5],[42000,10],[58000,25],[78000,50],[105000,75],[140000,90],[195000,98]],
+  edu:     [[0.05,5],[0.10,10],[0.17,25],[0.30,50],[0.47,75],[0.64,90],[0.80,98]],
   density: [[50,5],[150,10],[800,25],[2500,50],[5800,75],[13000,90],[40000,98]],
-  family:  [[0.30,5],[0.40,10],[0.52,25],[0.64,50],[0.74,75],[0.81,90],[0.88,98]],
+  family:  [[0.30,5],[0.40,10],[0.52,25],[0.63,50],[0.73,75],[0.81,90],[0.88,98]],
   homeown: [[0.10,5],[0.22,10],[0.45,25],[0.66,50],[0.80,75],[0.90,90],[0.96,98]],
 };
 
@@ -396,7 +517,7 @@ async function fetchPOIs(lat,lon){
   nwr(around:${2*MI|0},${lat},${lon})["shop"~"^(supermarket|convenience|department_store|variety_store)$"];
   nwr(around:${2*MI|0},${lat},${lon})["amenity"~"^(fast_food|restaurant|cafe)$"];
 );
-out center 600;`;
+out center 1200;`;
   const js=await overpass(q);
   const seen=new Set(), anchors=[], others=[];
   (js.elements||[]).forEach(el=>{
@@ -443,8 +564,11 @@ function aggregate(acs, geo){
 function scoreArea(agg, pois, road, profileKey){
   const prof=PROFILES[profileKey];
   const uniq={}; pois.anchors.forEach(a=>{if(!uniq[a.label]||a.d<uniq[a.label].d)uniq[a.label]=a;});
-  const roster=Object.values(uniq).sort((a,b)=>a.d-b.d);
+  const tierOrd={premium:0,mid:1,value:2};
+  const roster=Object.values(uniq).sort((a,b)=>(tierOrd[a.tier]-tierOrd[b.tier])||(a.d-b.d));
   const prem=roster.filter(a=>a.tier==="premium").length;
+  const val=roster.filter(a=>a.tier==="value").length;
+  const midc=roster.length-prem-val;
   const cotenRaw={raw:roster.length,prem};
   const signals={
     income:{v:agg.income, p:pctile(agg.income,BENCH.income)},
@@ -452,7 +576,7 @@ function scoreArea(agg, pois, road, profileKey){
     density:{v:agg.density, p:pctile(agg.density,BENCH.density)},
     family:{v:agg.family, p:pctile(agg.family,BENCH.family)},
     homeown:{v:agg.homeown, p:pctile(agg.homeown,BENCH.homeown)},
-    cotenancy:{v:cotenRaw, p:Math.min(100, prem*12 + (roster.length-prem)*6)},
+    cotenancy:{v:cotenRaw, p:Math.min(100, prem*8 + midc*2 + val*1.5)},
     access:{v:road.label, p:road.score},
     vitality:{v:pois.others.length, p:Math.min(100, pois.others.length*1.2)},
   };
@@ -590,6 +714,54 @@ async function runDiag(){
     "\nAnything with ✗ is being blocked by your browser extensions, network, or a local file:// origin.");
 }
 $("#diagLink").addEventListener("click",e=>{e.preventDefault();runDiag();});
+/* ================= benchmark recalibration (exact national percentiles) ================= */
+const STATE_FIPS=["01","02","04","05","06","08","09","10","11","12","13","15","16","17","18","19","20",
+  "21","22","23","24","25","26","27","28","29","30","31","32","33","34","35","36","37","38","39","40",
+  "41","42","44","45","46","47","48","49","50","51","53","54","55","56"]; // 50 states + DC
+const QPTS=[5,10,25,50,75,90,98];
+const quantile=(sorted,q)=>{const i=(sorted.length-1)*q/100, lo=Math.floor(i), hi=Math.ceil(i);
+  return lo===hi?sorted[lo]:sorted[lo]+(sorted[hi]-sorted[lo])*(i-lo);};
+const toBreakpoints=(vals,round)=>{const s=vals.slice().sort((a,b)=>a-b);return QPTS.map(p=>[round(quantile(s,p)),p]);};
+let recalRunning=false;
+async function recalibrate(){
+  if(recalRunning)return; recalRunning=true;
+  const inc=[],edu=[],fam=[],own=[];
+  const vars="B19013_001E,B15003_001E,B15003_022E,B15003_023E,B15003_024E,B15003_025E,B11001_001E,B11001_002E,B25003_001E,B25003_002E";
+  try{
+    for(let i=0;i<STATE_FIPS.length;i++){
+      const st=STATE_FIPS[i];
+      setStatus(`Recalibrating benchmarks from ACS ${ACS_YEAR} — state ${i+1}/${STATE_FIPS.length} (${inc.length.toLocaleString()} tracts so far)…`);
+      const u=`https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=${vars}&for=tract:*&in=state:${st}`+(ACS_KEY?`&key=${ACS_KEY}`:"");
+      let rows;
+      try{ rows=await jgetRetry(u,null,"Census ACS API"); }
+      catch(e){ rows=await jget(corsProxy(u),null,"Census ACS via allorigins.win proxy"); }
+      const ix=Object.fromEntries(rows[0].map((h,j)=>[h,j]));
+      rows.slice(1).forEach(r=>{
+        const gi=acsNum(r[ix.B19013_001E]); if(gi!=null&&gi>0)inc.push(gi);
+        const p25=acsNum(r[ix.B15003_001E]);
+        if(p25>=100){const b=(acsNum(r[ix.B15003_022E])||0)+(acsNum(r[ix.B15003_023E])||0)+
+          (acsNum(r[ix.B15003_024E])||0)+(acsNum(r[ix.B15003_025E])||0); edu.push(b/p25);}
+        const hh=acsNum(r[ix.B11001_001E]), fh=acsNum(r[ix.B11001_002E]);
+        if(hh>=100&&fh!=null)fam.push(fh/hh);
+        const oc=acsNum(r[ix.B25003_001E]), ow=acsNum(r[ix.B25003_002E]);
+        if(oc>=100&&ow!=null)own.push(ow/oc);
+      });
+    }
+    BENCH={ income:toBreakpoints(inc,v=>Math.round(v/500)*500),
+            edu:toBreakpoints(edu,v=>+v.toFixed(3)),
+            density:BENCH.density,      // land area isn't in the ACS API — density stays approximate
+            family:toBreakpoints(fam,v=>+v.toFixed(3)),
+            homeown:toBreakpoints(own,v=>+v.toFixed(3)) };
+    try{localStorage.setItem("siteScoutBench",JSON.stringify({vintage:ACS_YEAR,bench:BENCH}));}catch(e){}
+    console.info("Site Scout — exact benchmarks. To hardcode permanently, replace the BENCH block with:\n\nlet BENCH = "+JSON.stringify(BENCH)+";");
+    setStatus(`Benchmarks recalibrated from ${inc.length.toLocaleString()} US tracts (ACS ${ACS_YEAR}) — active now and saved in this browser.\nOpen the console (F12) for a paste-ready BENCH block to hardcode it for every device.`);
+    rescore();
+  }catch(e){
+    console.error(e);
+    setStatus("Recalibration stopped: "+e.message+"\nExisting benchmarks remain in effect — retry any time.",true);
+  }finally{recalRunning=false;}
+}
+$("#recalLink").addEventListener("click",e=>{e.preventDefault();recalibrate();});
 
 /* ================= bootstrap: ensure Leaflet, with CDN fallbacks ================= */
 const LEAFLET_FALLBACKS=[
@@ -599,7 +771,22 @@ const LEAFLET_FALLBACKS=[
 const loadScript=src=>new Promise((res,rej)=>{const s=document.createElement("script");
   s.src=src;s.onload=res;s.onerror=()=>rej(new Error("failed "+src));document.head.appendChild(s);});
 const loadCss=href=>{const l=document.createElement("link");l.rel="stylesheet";l.href=href;document.head.appendChild(l);};
+async function detectVintage(){
+  // Probe for ACS 5-yr vintages newer than the default (new releases land each Dec–Jan); keep the newest that responds.
+  const thisYear=new Date().getFullYear();
+  for(let y=thisYear-1; y>ACS_YEAR; y--){
+    try{
+      await jget(`https://api.census.gov/data/${y}/acs/acs5?get=NAME&for=us:1${ACS_KEY?`&key=${ACS_KEY}`:""}`,null,"Census ACS API");
+      ACS_YEAR=y; console.info("Site Scout: using ACS 5-yr vintage",y); break;
+    }catch(e){/* vintage not published yet — try the next older year */}
+  }
+}
 (async function boot(){
+  await detectVintage();  // fast: one tiny probe per candidate year
+  try{ // restore exact benchmarks if previously recalibrated for this vintage
+    const c=JSON.parse(localStorage.getItem("siteScoutBench")||"null");
+    if(c&&c.vintage===ACS_YEAR&&c.bench&&c.bench.income){BENCH=c.bench;console.info("Site Scout: using recalibrated ACS "+ACS_YEAR+" benchmarks from this browser");}
+  }catch(e){/* defaults remain */}
   if(!window.L){ // primary CDN (unpkg, in <head>) failed — try fallbacks
     for(const [js,css] of LEAFLET_FALLBACKS){
       try{ await loadScript(js); loadCss(css); break; }catch(e){/* try next CDN */}
