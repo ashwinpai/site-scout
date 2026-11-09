@@ -696,11 +696,11 @@ const DIAG_TESTS=[
   ["Nominatim geocoder","https://nominatim.openstreetmap.org/status?format=json"],
   ["FCC Area API","https://geo.fcc.gov/api/census/area?lat=35.2271&lon=-80.8431&censusYear=2020&format=json"],
   ["Census geocoder","https://geocoding.geo.census.gov/geocoder/geographies/coordinates?x=-80.8431&y=35.2271&benchmark=Public_AR_Current&vintage=Current_Current&layers=Census%20Tracts&format=json"],
-  ["Census ACS API","https://api.census.gov/data/"+ACS_YEAR+"/acs/acs5?get=NAME&for=state:37"],
+  ["Census ACS API","https://api.census.gov/data/"+ACS_YEAR+"/acs/acs5?get=NAME&for=state:37"+(ACS_KEY?"&key="+ACS_KEY:"")],
   ["TIGERweb boundaries","https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Tracts_Blocks/MapServer?f=json"],
   ["Overpass (overpass-api.de)","https://overpass-api.de/api/status"],
   ["Overpass (kumi.systems)","https://overpass.kumi.systems/api/status"],
-  ["CORS proxy (allorigins.win)","https://api.allorigins.win/raw?url="+encodeURIComponent("https://api.census.gov/data/"+ACS_YEAR+"/acs/acs5?get=NAME&for=state:37")],
+  ["CORS proxy (allorigins.win)","https://api.allorigins.win/raw?url="+encodeURIComponent("https://api.census.gov/data/"+ACS_YEAR+"/acs/acs5?get=NAME&for=state:37"+(ACS_KEY?"&key="+ACS_KEY:""))],
 ];
 async function runDiag(){
   setStatus("Running connectivity check (9 hosts)…");
