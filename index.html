@@ -154,7 +154,7 @@
       <div class="sec">
         <h2>Caveats</h2>
         <div class="caveat">
-          Demographics are population-weighted averages of the Census tracts sampled inside a 2.5-mile ring (ACS 5-year estimates; small-area figures carry sampling error). Percentiles use approximate national tract-level benchmarks embedded in this tool. Retailer locations come from OpenStreetMap and may be incomplete or stale. Road access is a proxy for traffic counts, not measured AADT. This is a research toy, not underwriting.
+          Demographics combine the Census tracts sampled within 2.5 miles (ACS 5-year estimates, which carry sampling error in small tracts). Income is a household-weighted average of tract medians, not a true median. Percentiles compare against national tract benchmarks. Store locations come from OpenStreetMap and can be incomplete or out of date. Road access is based on road type, not measured traffic counts. Use it for research, not investment decisions.
         </div>
       </div>
     </div>
@@ -178,11 +178,11 @@
    SITE SCOUT — single-file trade-area assessment tool
    Data: US Census ACS 5-yr API, FCC Area API (point→tract),
          TIGERweb (tract geometry/area), OpenStreetMap Overpass (POIs),
-         Nominatim (geocoding). All free, keyless, CORS-enabled.
+         Nominatim (geocoding). All free and CORS-enabled; only the Census API uses a (free) key.
    ===================================================================== */
 
-const ACS_YEAR = 2024;              // 2020–2024 5-yr, released Jan 2026 — newest tract-level vintage; auto-upgrades at boot
-const ACS_KEY  = "88f2de9fff59a251effa4e17a34dd50a0c0c13bc";                // free key from api.census.gov to lift the 500 req/day IP limit
+let ACS_YEAR = 2024;                // ACS 2020–2024 5-year; checks for a newer vintage at load
+const ACS_KEY  = "88f2de9fff59a251effa4e17a34dd50a0c0c13bc";  // free Census key; visible to anyone who views source (unavoidable without a backend)
 const MI = 1609.344;                // meters per mile
 
 /* ---------- Anchor brand catalog ---------- 
@@ -397,6 +397,7 @@ async function jgetRetry(url,opts,label,tries=2,delayMs=700){
   }
   throw last;
 }
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const corsProxy=u=>"https://api.allorigins.win/raw?url="+encodeURIComponent(u);
 
 /* ================= map (initialized only after Leaflet is confirmed loaded) ================= */
@@ -517,7 +518,7 @@ async function fetchPOIs(lat,lon){
   nwr(around:${2*MI|0},${lat},${lon})["shop"~"^(supermarket|convenience|department_store|variety_store)$"];
   nwr(around:${2*MI|0},${lat},${lon})["amenity"~"^(fast_food|restaurant|cafe)$"];
 );
-out center 1200;`;
+out center 2500;`;
   const js=await overpass(q);
   const seen=new Set(), anchors=[], others=[];
   (js.elements||[]).forEach(el=>{
@@ -592,14 +593,13 @@ function scoreArea(agg, pois, road, profileKey){
 }
 
 /* ================= rendering ================= */
-const tierColor={premium:"var(--good)",mid:"#3B6EA5",value:"#C07A2E"};
 function drawMap(lat,lon,geo,pois){
   layerGroup.clearLayers();
-  [1,3,5].forEach(mi=>L.circle([lat,lon],{radius:mi*MI,color:"var(--pine)",weight:mi===5?1.5:1,opacity:.55,fill:mi===1,fillOpacity:.05}).addTo(layerGroup));
+  [1,3,5].forEach(mi=>L.circle([lat,lon],{radius:mi*MI,color:"#2C5E4F",weight:mi===5?1.5:1,opacity:.55,fill:mi===1,fillOpacity:.05}).addTo(layerGroup));
   geo.forEach(t=>t.rings.forEach(r=>L.polygon(r,{color:"#8A9A90",weight:1,dashArray:"4 4",fill:false,opacity:.7}).addTo(layerGroup)));
-  L.circleMarker([lat,lon],{radius:7,color:"#fff",weight:2,fillColor:"var(--ink)",fillOpacity:1}).addTo(layerGroup).bindTooltip("Assessment point");
+  L.circleMarker([lat,lon],{radius:7,color:"#fff",weight:2,fillColor:"#1C2620",fillOpacity:1}).addTo(layerGroup).bindTooltip("Assessment point");
   pois.others.forEach(p=>L.circleMarker([p.lat,p.lon],{radius:3,color:"#9AA5A0",weight:1,fillColor:"#9AA5A0",fillOpacity:.7})
-    .addTo(layerGroup).bindTooltip(p.name));
+    .addTo(layerGroup).bindTooltip(esc(p.name)));
   pois.anchors.forEach(a=>L.circleMarker([a.lat,a.lon],{radius:6,color:"#fff",weight:1.5,fillColor:({premium:"#2F7A52",mid:"#3B6EA5",value:"#C07A2E"})[a.tier],fillOpacity:1})
     .addTo(layerGroup).bindTooltip(`${a.label} · ${(a.d/MI).toFixed(1)} mi`));
   map.fitBounds(L.latLng(lat,lon).toBounds(10*MI),{padding:[10,10]}); // 10mi-wide box = 5mi radius view
